@@ -27,7 +27,8 @@ requests>=2.31.0
 
 # Source dataset access
 fiftyone>=0.23.0           # Open Images V7
-wikimedia>=0.1.0
+# Wikimedia Commons accessed via the MediaWiki HTTP API (uses `requests`,
+# no extra dependency needed).
 
 # ML (training in Colab; we keep imports light locally)
 # Pinned versions installed in the Colab notebook itself.
