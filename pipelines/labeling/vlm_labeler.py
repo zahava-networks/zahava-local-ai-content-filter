@@ -22,13 +22,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import os
+
 import pandas as pd
 import requests
 from PIL import Image
 from pydantic import ValidationError
 from tqdm import tqdm
 
-from ..common import get_logger, load_config, manifests_dir, require_env
+from ..common import get_logger, load_config, load_env, manifests_dir, require_env
 from ..collection import r2_client
 from .block_rule import reconcile
 from .labels_store import LabelRecord, append, known_ids
@@ -131,10 +133,15 @@ class _NIMClient:
         return None, f"failed_after_retries:{last_err}"
 
 
+def gemini_available() -> bool:
+    load_env()
+    return bool(os.environ.get("GEMINI_API_KEY"))
+
+
 class _GeminiClient:
     def __init__(self) -> None:
         cfg = load_config()["labeling"]["gemini"]
-        self.model = require_env("GEMINI_MODEL")
+        self.model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
         self.api_key = require_env("GEMINI_API_KEY")
         self.timeout = cfg["timeout_s"]
         self.max_retries = cfg["max_retries"]
@@ -230,7 +237,9 @@ def run(
 
     qa_rate = use_gemini_qa_rate if use_gemini_qa_rate is not None else cfg["vlm_agreement_check_rate"]
     nim = _NIMClient()
-    gemini = _GeminiClient()
+    gemini = _GeminiClient() if gemini_available() else None
+    if gemini is None:
+        log.info("GEMINI_API_KEY not set — running NIM-only; safety refusals route to human review")
 
     pbar = tqdm(total=len(pending), desc=round_name)
     for _, row in pending.iterrows():
@@ -247,7 +256,7 @@ def run(
             flagged = False
             reason = None
 
-            if random.random() < qa_rate:
+            if gemini is not None and random.random() < qa_rate:
                 gemini_label, _ = gemini.label(raw)
                 if gemini_label is not None:
                     gemini_label = reconcile(gemini_label)
@@ -258,7 +267,10 @@ def run(
 
             append(round_name, _record(row["image_id"], row["r2_key"], "nim", nim_label, flagged, reason))
         elif nim_status.startswith("safety_refusal"):
-            gemini_label, gstatus = gemini.label(raw)
+            gemini_label = None
+            gstatus = "gemini_unavailable"
+            if gemini is not None:
+                gemini_label, gstatus = gemini.label(raw)
             if gemini_label is not None:
                 gemini_label = reconcile(gemini_label)
                 append(round_name, _record(row["image_id"], row["r2_key"], "gemini", gemini_label, True, "nim_refused"))
@@ -271,11 +283,11 @@ def run(
                         labeler="none",
                         labeled_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         label_json="{}",
-                        block=True,  # conservative default
+                        block=True,  # conservative default — "when in doubt, block"
                         confidence=0.0,
                         violations_json="[]",
                         flagged_for_review=True,
-                        review_reason=f"both_refused:{nim_status}|{gstatus}",
+                        review_reason=f"nim_refused_no_fallback:{nim_status}|{gstatus}",
                     ),
                 )
         else:

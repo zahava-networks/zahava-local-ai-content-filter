@@ -6,6 +6,7 @@ Run after filling in `.env` to confirm everything is wired up:
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -21,8 +22,16 @@ def _err(msg: str) -> None:
     print(f"  \033[31m✗\033[0m {msg}")
 
 
+def _info(msg: str) -> None:
+    print(f"  \033[2m·\033[0m {msg}")
+
+
 def _section(name: str) -> None:
     print(f"\n\033[1m{name}\033[0m")
+
+
+REQUIRED_ENV = ["HF_TOKEN", "HF_DATASET_REPO", "HF_MODEL_REPO", "NIM_API_KEY", "NIM_BASE_URL", "NIM_MODEL"]
+OPTIONAL_ENV = ["GEMINI_API_KEY", "UNSPLASH_ACCESS_KEY", "PEXELS_API_KEY", "KAGGLE_KEY", "LIGHTNING_USER_KEY"]
 
 
 def check_imports() -> bool:
@@ -34,36 +43,13 @@ def check_imports() -> bool:
         "pipelines.collection.image_utils",
         "pipelines.collection.dedup",
         "pipelines.collection.base",
-        "pipelines.collection.collect_open_images",
-        "pipelines.collection.collect_huggingface",
-        "pipelines.collection.collect_unsplash",
-        "pipelines.collection.collect_pexels",
-        "pipelines.collection.collect_wikimedia",
         "pipelines.collection.run_all",
         "pipelines.labeling.schema",
         "pipelines.labeling.block_rule",
         "pipelines.labeling.rate_limiter",
         "pipelines.labeling.labels_store",
-        "pipelines.labeling.nsfw_oracle",
-        "pipelines.labeling.vlm_labeler",
-        "pipelines.labeling.run",
         "pipelines.training.heads",
-        "pipelines.training.dataset",
-        "pipelines.training.model",
-        "pipelines.training.train",
-        "pipelines.training.threshold_tuner",
-        "pipelines.training.calibrator",
-        "pipelines.export.calibration_set",
-        "pipelines.export.export_tflite",
-        "pipelines.export.export_coreml",
-        "pipelines.export.export_full",
-        "pipelines.eval.benchmark",
-        "pipelines.eval.html_report",
-        "pipelines.eval.latency_on_device",
-        "pipelines.active_learning.uncertainty_sampling",
-        "pipelines.active_learning.round_runner",
         "review_ui.db",
-        "review_ui.queue_manager",
         "review_ui.server",
     ]
     all_ok = True
@@ -82,45 +68,44 @@ def check_env() -> bool:
     from pipelines.common import load_env
 
     load_env()
-    import os
-
-    required = [
-        "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_ENDPOINT",
-        "HF_TOKEN", "HF_DATASET_REPO",
-        "NIM_API_KEY", "NIM_MODEL",
-        "GEMINI_API_KEY", "GEMINI_MODEL",
-    ]
     ok = True
-    for k in required:
+    for k in REQUIRED_ENV:
         if os.environ.get(k):
             _ok(k)
         else:
-            _err(f"{k} missing")
+            _err(f"{k} (REQUIRED) missing")
             ok = False
+    for k in OPTIONAL_ENV:
+        if os.environ.get(k):
+            _ok(f"{k} (optional, configured)")
+        else:
+            _info(f"{k} (optional, blank)")
     return ok
 
 
-def check_r2() -> bool:
-    _section("Cloudflare R2")
-    try:
-        from pipelines.collection import r2_client
-        b = r2_client.bucket()
-        keys = list(r2_client.list_keys("", limit=1))
-        _ok(f"bucket={b} (listing ok)")
-        return True
-    except Exception as e:
-        _err(f"{type(e).__name__}: {e}")
-        return False
-
-
-def check_hf() -> bool:
-    _section("HuggingFace")
+def check_hf_dataset() -> bool:
+    _section("HuggingFace (storage + auth)")
     try:
         from huggingface_hub import HfApi
         from pipelines.common import require_env
+
         api = HfApi(token=require_env("HF_TOKEN"))
         user = api.whoami()
         _ok(f"whoami: {user.get('name','?')}")
+        repo = require_env("HF_DATASET_REPO")
+        try:
+            api.repo_info(repo, repo_type="dataset")
+            _ok(f"dataset repo exists: {repo}")
+        except Exception:
+            api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
+            _ok(f"dataset repo created (private): {repo}")
+        model_repo = require_env("HF_MODEL_REPO")
+        try:
+            api.repo_info(model_repo)
+            _ok(f"model repo exists: {model_repo}")
+        except Exception:
+            api.create_repo(model_repo, private=True, exist_ok=True)
+            _ok(f"model repo created (private): {model_repo}")
         return True
     except Exception as e:
         _err(f"{type(e).__name__}: {e}")
@@ -136,27 +121,29 @@ def check_nim() -> bool:
         url = require_env("NIM_BASE_URL").rstrip("/") + "/models"
         r = requests.get(url, headers={"Authorization": f"Bearer {require_env('NIM_API_KEY')}"}, timeout=10)
         r.raise_for_status()
-        _ok(f"models endpoint reachable")
+        _ok("models endpoint reachable")
         return True
     except Exception as e:
         _err(f"{type(e).__name__}: {e}")
         return False
 
 
-def check_gemini() -> bool:
-    _section("Google Gemini")
+def check_gemini_optional() -> None:
+    _section("Gemini (optional)")
+    from pipelines.common import load_env
+
+    load_env()
+    if not os.environ.get("GEMINI_API_KEY"):
+        _info("GEMINI_API_KEY not set — NIM-only mode; safety refusals route to human review")
+        return
     try:
         from google import genai
-        from pipelines.common import require_env
 
-        client = genai.Client(api_key=require_env("GEMINI_API_KEY"))
-        models = client.models.list()
-        names = [m.name for m in models]
-        _ok(f"models listed: {len(names)} available")
-        return True
+        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        list(client.models.list())
+        _ok("Gemini reachable")
     except Exception as e:
-        _err(f"{type(e).__name__}: {e}")
-        return False
+        _err(f"Gemini configured but unreachable: {type(e).__name__}: {e}")
 
 
 def run() -> int:
@@ -164,16 +151,15 @@ def run() -> int:
     ok_imports = check_imports()
     ok_env = check_env()
     if ok_env:
-        check_r2()
-        check_hf()
+        check_hf_dataset()
         check_nim()
-        check_gemini()
+        check_gemini_optional()
     print()
     if not ok_imports:
-        print("\033[31mFAIL\033[0m: imports broken — fix before doing anything else.")
+        print("\033[31mFAIL\033[0m: imports broken")
         return 1
     if not ok_env:
-        print("\033[33mWARN\033[0m: .env incomplete — set keys before running pipelines.")
+        print("\033[33mWARN\033[0m: required .env values missing")
         return 2
     print("\033[32mOK\033[0m")
     return 0

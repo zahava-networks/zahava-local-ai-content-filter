@@ -68,7 +68,7 @@ def ingest(
 
     resized = resize_for_storage(img)
     body = encode_webp(resized)
-    r2_key = f"{cfg['storage']['r2']['prefix_resized']}{source}/{iid}.webp"
+    r2_key = f"{cfg['storage']['prefix_resized']}{source}/{iid}.webp"
 
     if not r2_client.exists(r2_key):
         r2_client.upload_bytes(r2_key, body, content_type="image/webp")

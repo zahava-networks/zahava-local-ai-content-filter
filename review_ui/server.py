@@ -12,9 +12,10 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from cachetools import LRUCache
 
 from pipelines.collection import r2_client
 from pipelines.common import get_logger, load_config
@@ -24,6 +25,8 @@ from . import db, queue_manager
 log = get_logger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = FastAPI(title="Tzniut Review UI", version="0.1.0")
+
+_image_cache: LRUCache = LRUCache(maxsize=256)
 
 
 class Decision(BaseModel):
@@ -43,8 +46,6 @@ def api_next():
     item = db.next_pending()
     if not item:
         return JSONResponse({"empty": True})
-    cfg = load_config()["review_ui"]
-    signed = r2_client.presigned_get_url(item["r2_key"], expires_in=cfg["presigned_url_ttl_s"])
     try:
         ai_label = json.loads(item["ai_label_json"])
     except Exception:
@@ -52,11 +53,30 @@ def api_next():
     return {
         "image_id": item["image_id"],
         "r2_key": item["r2_key"],
-        "image_url": signed,
+        "image_url": f"/api/image/{item['image_id']}",
         "ai_label": ai_label,
         "ai_confidence": item["ai_confidence"],
         "flag_reason": item.get("flag_reason"),
     }
+
+
+@app.get("/api/image/{image_id}")
+def api_image(image_id: str):
+    cached = _image_cache.get(image_id)
+    if cached is not None:
+        body, ctype = cached
+        return Response(content=body, media_type=ctype)
+    with db.connect() as c:
+        row = c.execute("SELECT r2_key FROM queue WHERE image_id = ?", (image_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "unknown image_id")
+    try:
+        body = r2_client.download_bytes(row["r2_key"])
+    except Exception as e:
+        raise HTTPException(502, f"fetch failed: {e}")
+    ctype = "image/webp" if row["r2_key"].endswith(".webp") else "image/jpeg"
+    _image_cache[image_id] = (body, ctype)
+    return Response(content=body, media_type=ctype)
 
 
 @app.post("/api/decision")

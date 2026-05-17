@@ -10,14 +10,10 @@ paths:
   state_dir: .state
 
 storage:
-  r2:
-    bucket_env: R2_BUCKET
-    endpoint_env: R2_ENDPOINT
-    access_key_env: R2_ACCESS_KEY_ID
-    secret_key_env: R2_SECRET_ACCESS_KEY
-    prefix_raw: raw/
-    prefix_resized: resized/
-    prefix_crops: crops/
+  backend: huggingface              # blob storage backend; "huggingface" is the 2-key default
+  prefix_raw: images/raw/
+  prefix_resized: images/resized/
+  prefix_crops: images/crops/
   hf:
     token_env: HF_TOKEN
     dataset_repo_env: HF_DATASET_REPO

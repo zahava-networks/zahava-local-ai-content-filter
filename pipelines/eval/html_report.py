@@ -5,11 +5,14 @@ Thumbnails are presigned R2 URLs (valid for 24h). FN highlighted red, FP yellow.
 from __future__ import annotations
 
 import argparse
+import base64
 import html
+import io
 import json
 from pathlib import Path
 
 import pandas as pd
+from PIL import Image
 
 from ..common import REPO_ROOT, get_logger
 from ..collection import r2_client
@@ -82,11 +85,21 @@ _HTML_TPL = """<!doctype html>
 """
 
 
-def _card(row: pd.Series, kind: str) -> str:
+def _thumb_b64(r2_key: str, max_side: int = 200) -> str:
+    """Fetch image, downscale to a thumbnail, return base64 WebP data URL."""
     try:
-        url = r2_client.presigned_get_url(row["r2_key"], expires_in=86400) if row.get("r2_key") else ""
+        raw = r2_client.download_bytes(r2_key)
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="WEBP", quality=75)
+        return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
     except Exception:
-        url = ""
+        return ""
+
+
+def _card(row: pd.Series, kind: str) -> str:
+    url = _thumb_b64(row["r2_key"]) if row.get("r2_key") else ""
     return f"""
 <div class="card {kind}">
   <img src="{html.escape(url)}" loading="lazy" alt="" />

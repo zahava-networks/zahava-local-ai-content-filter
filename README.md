@@ -17,7 +17,7 @@ Image
   → BLOCK / ALLOW + reason
 ```
 
-All training data lives in Cloudflare R2 + HuggingFace Datasets. Training runs on Google Colab / Kaggle / Lightning AI free tiers. The only thing on your laptop is the orchestrator CLI, the human review UI, and the final model file.
+All training data lives in HuggingFace Datasets (1TB free public / 100GB free private). Training runs on Google Colab / Kaggle / Lightning AI free tiers. The only thing on your laptop is the orchestrator CLI, the human review UI, and the final model file.
 
 See [plan](../.claude/plans/you-are-the-best-tidy-glade.md) for full design.
 
@@ -27,17 +27,24 @@ See [plan](../.claude/plans/you-are-the-best-tidy-glade.md) for full design.
 
 ### 1. Accounts (all free, no credit card)
 
+**Required (2 keys total):**
+
 | Service | Why | URL |
 |---------|-----|-----|
-| Google | Drive, Colab, Gemini | already have |
-| HuggingFace | Datasets storage + streaming | https://huggingface.co/join |
-| Cloudflare | R2 bulk image storage (unlimited egress) | https://dash.cloudflare.com/sign-up |
+| HuggingFace | Storage backend: images + labels + model artifacts | https://huggingface.co/join |
 | NVIDIA NIM | VLM labeling, ~40 RPM free | https://build.nvidia.com |
-| Google AI Studio | Gemini API key | https://aistudio.google.com/apikey |
+
+Plus your existing Google account for Colab.
+
+**Optional (add later if needed):**
+
+| Service | What it unlocks | URL |
+|---------|-----------------|-----|
+| Google AI Studio (Gemini) | Fallback labeler for NIM safety refusals | https://aistudio.google.com/apikey |
+| Unsplash | "Modest fashion" search-based image collection | https://unsplash.com/developers |
+| Pexels | Additional search-based image collection | https://www.pexels.com/api |
 | Kaggle | Backup free GPU (30h/week P100) | https://www.kaggle.com |
 | Lightning AI | Backup free GPU (80h/month) | https://lightning.ai |
-| Unsplash | Image source API | https://unsplash.com/developers |
-| Pexels | Image source API | https://www.pexels.com/api |
 
 ### 2. Local install
 
