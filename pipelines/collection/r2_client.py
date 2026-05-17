@@ -21,7 +21,9 @@ to commit anything below BATCH_SIZE.
 from __future__ import annotations
 
 import io
+import re
 import shutil
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterator, Optional
@@ -33,7 +35,10 @@ from ..common import REPO_ROOT, get_logger, require_env
 log = get_logger(__name__)
 
 _STAGING = REPO_ROOT / ".hf_staging"
-_BATCH_SIZE = 100
+_BATCH_SIZE = 2000  # files staged before auto-flush; large to minimize commits
+_COMMIT_LIMIT_PER_HOUR = 128  # HF hard limit on free tier
+_MIN_COMMIT_INTERVAL_S = 3600 / _COMMIT_LIMIT_PER_HOUR  # ≈28s
+_last_commit_ts: float = 0.0
 
 
 @lru_cache(maxsize=1)
@@ -78,24 +83,61 @@ def upload_bytes(key: str, data: bytes, content_type: str = "image/webp") -> Non
         flush_pending()
 
 
+def _parse_retry_after(msg: str) -> int:
+    """Extract sleep duration from HF 429 error message."""
+    m = re.search(r"Retry after (\d+) seconds?", msg)
+    if m:
+        return int(m.group(1)) + 5
+    if "commits" in msg and "per hour" in msg:
+        return 3600
+    return 60
+
+
 def flush_pending(min_count: int = 1) -> int:
-    """Commit all staged files in a single HF commit. Returns count committed."""
+    """Commit all staged files in a single HF commit. Returns count committed.
+
+    Self-throttles to stay under HF's 128-commits-per-hour limit. On 429
+    rate-limit errors, sleeps for the duration HF specifies and retries.
+    """
+    global _last_commit_ts
     staged = _staged_paths()
     n = len(staged)
     if n < min_count:
         return 0
+
+    elapsed = time.time() - _last_commit_ts
+    if elapsed < _MIN_COMMIT_INTERVAL_S:
+        wait = _MIN_COMMIT_INTERVAL_S - elapsed
+        log.info("pre-flush throttle: sleeping %.1fs to stay under 128/hr", wait)
+        time.sleep(wait)
+
     log.info("flushing %d staged files to HF (one commit)", n)
-    try:
-        _api().upload_folder(
-            folder_path=str(_STAGING),
-            path_in_repo="",
-            repo_id=_repo(),
-            repo_type="dataset",
-            commit_message=f"batch upload: {n} files",
-        )
-    except Exception as e:
-        log.exception("flush_pending failed: %s — keeping staged files for next attempt", e)
-        raise
+    for attempt in range(6):
+        try:
+            _api().upload_folder(
+                folder_path=str(_STAGING),
+                path_in_repo="",
+                repo_id=_repo(),
+                repo_type="dataset",
+                commit_message=f"batch upload: {n} files",
+            )
+            _last_commit_ts = time.time()
+            break
+        except Exception as e:
+            msg = str(e)
+            if "429" in msg or "Too Many Requests" in msg or "rate limit" in msg.lower():
+                wait_s = _parse_retry_after(msg)
+                log.warning(
+                    "HF rate-limit hit (attempt %d/6): sleeping %ds before retry",
+                    attempt + 1,
+                    wait_s,
+                )
+                time.sleep(wait_s)
+                continue
+            log.exception("flush_pending failed: %s — keeping staged files for next attempt", e)
+            raise
+    else:
+        raise RuntimeError("flush_pending: 6 retries exhausted; staged files preserved on disk")
 
     cache = _known_files_cache()
     for f in staged:
