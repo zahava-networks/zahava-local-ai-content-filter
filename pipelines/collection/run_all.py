@@ -20,6 +20,7 @@ KEY_GATED = {"unsplash": "UNSPLASH_ACCESS_KEY", "pexels": "PEXELS_API_KEY"}
 
 def run(only: list[str] | None = None, skip_dedup: bool = False) -> None:
     load_env()
+    from . import r2_client
     runners = {
         "open_images": lambda: __import__("pipelines.collection.collect_open_images", fromlist=["run"]).run(),
         "deepfashion2": lambda: __import__("pipelines.collection.collect_huggingface", fromlist=["run"]).run("deepfashion2"),
@@ -45,6 +46,13 @@ def run(only: list[str] | None = None, skip_dedup: bool = False) -> None:
             runners[name]()
         except Exception as e:
             log.exception("%s failed: %s — moving on", name, e)
+        finally:
+            try:
+                n = r2_client.flush_pending(min_count=1)
+                if n > 0:
+                    log.info("%s: flushed %d files in final batch", name, n)
+            except Exception as e:
+                log.exception("flush after %s failed: %s", name, e)
     out = mf.merge_to_parquet("collection.parquet")
     log.info("merged manifest → %s", out)
     if not skip_dedup:

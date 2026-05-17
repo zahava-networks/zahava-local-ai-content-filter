@@ -1,27 +1,39 @@
-"""Blob storage backed by HuggingFace Datasets.
+"""Blob storage backed by HuggingFace Datasets, with BATCHED commits.
 
-Despite the file name (kept for import stability), this stores images inside
-the configured HF Dataset repo. The `key` is the relative path inside the repo.
+Original approach (one upload_file per image) is silently dropped by HF Hub
+when called rapidly — every image becomes its own commit, which HF rate-limits.
 
-The pipeline only needs:
-  - upload_bytes(key, data)         — write a single object
-  - exists(key)                     — check membership (cached)
-  - download_bytes(key)             — read a single object
-  - list_keys(prefix, limit=None)   — enumerate objects under a prefix
-  - object_url(key)                 — a URL the *local server* can fetch with auth.
-                                      NOT safe to put in <img> tags for private repos.
+This module stages files on local disk, then commits them in batches via
+upload_folder (one HF commit per ~100 files). Much more efficient and
+actually persists.
 
-For browser display, the review UI proxies the bytes via /api/image/{image_id}.
+Public interface (same as before — callers don't change):
+  - upload_bytes(key, data)            — stage one file; auto-flushes at BATCH_SIZE
+  - flush_pending(min_count=1)         — commit staged files now
+  - exists(key)                        — check membership against repo + staging
+  - download_bytes(key)                — read a single object
+  - list_keys(prefix, limit=None)      — enumerate objects under a prefix
+  - object_url(key)                    — URL for server-side fetching
+
+Collectors should call flush_pending() once at the end of each source
+to commit anything below BATCH_SIZE.
 """
 from __future__ import annotations
 
 import io
+import shutil
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterator, Optional
 
 from huggingface_hub import HfApi, hf_hub_download, hf_hub_url
 
-from ..common import load_config, require_env
+from ..common import REPO_ROOT, get_logger, require_env
+
+log = get_logger(__name__)
+
+_STAGING = REPO_ROOT / ".hf_staging"
+_BATCH_SIZE = 100
 
 
 @lru_cache(maxsize=1)
@@ -39,39 +51,67 @@ def bucket() -> str:
 
 
 @lru_cache(maxsize=1)
-def _known_files() -> set[str]:
+def _known_files_cache() -> set[str]:
     try:
-        files = _api().list_repo_files(_repo(), repo_type="dataset")
-        return set(files)
-    except Exception:
+        return set(_api().list_repo_files(_repo(), repo_type="dataset"))
+    except Exception as e:
+        log.warning("list_repo_files failed (will retry on first miss): %s", e)
         return set()
 
 
-def _invalidate_cache() -> None:
-    _known_files.cache_clear()
+def _staged_paths() -> list[Path]:
+    if not _STAGING.exists():
+        return []
+    return [p for p in _STAGING.rglob("*") if p.is_file()]
+
+
+def _staged_count() -> int:
+    return len(_staged_paths())
 
 
 def upload_bytes(key: str, data: bytes, content_type: str = "image/webp") -> None:
-    _api().upload_file(
-        path_or_fileobj=io.BytesIO(data),
-        path_in_repo=key,
-        repo_id=_repo(),
-        repo_type="dataset",
-    )
-    cached = _known_files()
-    cached.add(key)
+    """Stage one file for the next batch commit; auto-flush at BATCH_SIZE."""
+    p = _STAGING / key
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    if _staged_count() >= _BATCH_SIZE:
+        flush_pending()
+
+
+def flush_pending(min_count: int = 1) -> int:
+    """Commit all staged files in a single HF commit. Returns count committed."""
+    staged = _staged_paths()
+    n = len(staged)
+    if n < min_count:
+        return 0
+    log.info("flushing %d staged files to HF (one commit)", n)
+    try:
+        _api().upload_folder(
+            folder_path=str(_STAGING),
+            path_in_repo="",
+            repo_id=_repo(),
+            repo_type="dataset",
+            commit_message=f"batch upload: {n} files",
+        )
+    except Exception as e:
+        log.exception("flush_pending failed: %s — keeping staged files for next attempt", e)
+        raise
+
+    cache = _known_files_cache()
+    for f in staged:
+        rel = f.relative_to(_STAGING)
+        cache.add(str(rel))
+    shutil.rmtree(_STAGING)
+    _STAGING.mkdir(parents=True, exist_ok=True)
+    log.info("flush OK: %d files now in HF dataset", n)
+    return n
 
 
 def exists(key: str) -> bool:
-    if key in _known_files():
+    if key in _known_files_cache():
         return True
-    try:
-        _api().get_paths_info(_repo(), [key], repo_type="dataset")
-        cached = _known_files()
-        cached.add(key)
-        return True
-    except Exception:
-        return False
+    staged = _STAGING / key
+    return staged.exists()
 
 
 def download_bytes(key: str) -> bytes:
@@ -86,31 +126,16 @@ def download_bytes(key: str) -> bytes:
 
 
 def object_url(key: str) -> str:
-    """URL for server-side fetching (NOT browser-safe for private repos)."""
     return hf_hub_url(repo_id=_repo(), filename=key, repo_type="dataset")
 
 
 def presigned_get_url(key: str, expires_in: int = 600) -> str:
-    """Backward-compatible alias.
-
-    For the local review UI: prefer the /api/image/{image_id} proxy endpoint
-    over this. This returns the bare HF URL which only works for *public* repos
-    when loaded in a browser.
-    """
     return object_url(key)
 
 
 def list_keys(prefix: str = "", limit: Optional[int] = None) -> Iterator[str]:
-    files = _known_files()
-    if not files:
-        try:
-            files = set(_api().list_repo_files(_repo(), repo_type="dataset"))
-            _known_files.cache_clear()
-            _known_files()  # repopulate
-        except Exception:
-            return
     n = 0
-    for f in sorted(files):
+    for f in sorted(_known_files_cache()):
         if f.startswith(prefix):
             yield f
             n += 1
