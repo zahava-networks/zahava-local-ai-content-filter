@@ -52,7 +52,10 @@ def run(max_to_collect: int | None = None) -> None:
         try:
             with open(sample.filepath, "rb") as f:
                 raw = f.read()
-            url = sample.get_field("open_images_id") or sample.filepath
+            try:
+                url = sample.get_field("open_images_id") or sample.filepath
+            except Exception:
+                url = sample.filepath
             res: IngestResult = ingest(SOURCE, str(sample.id), raw, str(url), LICENSE)
             if not res.skipped:
                 n_ingested += 1
