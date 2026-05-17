@@ -1,0 +1,133 @@
+project:
+  name: tzniut-classifier
+  version: 0.1.0
+
+paths:
+  manifests_dir: manifests
+  models_dir: models
+  test_sets_dir: test_sets
+  review_db: review_ui/review.db
+  state_dir: .state
+
+storage:
+  r2:
+    bucket_env: R2_BUCKET
+    endpoint_env: R2_ENDPOINT
+    access_key_env: R2_ACCESS_KEY_ID
+    secret_key_env: R2_SECRET_ACCESS_KEY
+    prefix_raw: raw/
+    prefix_resized: resized/
+    prefix_crops: crops/
+  hf:
+    token_env: HF_TOKEN
+    dataset_repo_env: HF_DATASET_REPO
+    model_repo_env: HF_MODEL_REPO
+
+image:
+  collection_resolution: 384       # stored size in R2
+  training_resolution: 224          # input size for MobileNetV4
+  jpeg_quality: 90
+  format: webp                      # smaller files; lossless transparency
+
+collection:
+  target_total: 200000
+  per_source_caps:
+    open_images: 80000
+    deepfashion2: 40000
+    fashionpedia: 20000
+    modanet: 15000
+    unsplash: 20000
+    pexels: 15000
+    wikimedia: 30000
+    icartoonface: 5000
+    manga109: 3000
+  dedup:
+    method: phash                   # perceptual hash
+    hamming_threshold: 4
+
+labeling:
+  nsfw_oracle:
+    model: Falconsai/nsfw_image_detection
+    batch_size: 32
+    threshold_block: 0.7            # >= this → automatic block (nudity)
+    threshold_skip_vlm: 0.85        # >= this → skip VLM stage entirely
+  nim:
+    rpm: 35                         # 40 actual cap, 5 safety margin
+    timeout_s: 60
+    max_retries: 5
+  gemini:
+    rpm: 13                         # 15 actual cap, 2 safety margin
+    timeout_s: 60
+    max_retries: 5
+  vlm_agreement_check_rate: 0.05    # 5% of NIM-labeled images also labeled by Gemini for QA
+  flag_for_review:
+    nim_gemini_disagreement: true
+    api_safety_refusal: true
+    low_confidence_threshold: 0.6
+
+review_ui:
+  port: 8765
+  prefetch_count: 5
+  presigned_url_ttl_s: 600
+
+training:
+  backbone: mobilenetv4_conv_small.e2400_r224_in1k
+  fallback_backbone: efficientnet_lite0
+  input_size: 224
+  batch_size: 128
+  epochs_round1: 30
+  epochs_subsequent: 12
+  learning_rate: 3.0e-4
+  weight_decay: 0.05
+  optimizer: adamw
+  lr_schedule: cosine
+  warmup_epochs: 2
+  augmentation:
+    rand_augment: true
+    mixup_alpha: 0.2
+    cutmix_alpha: 1.0
+    random_erasing: 0.25
+    color_jitter: 0.4
+  loss:
+    head_weights:
+      block: 3.0
+      sleeve_length: 1.5
+      neckline: 1.5
+      lower_garment: 1.0
+      lower_length: 1.5
+      fit: 1.5
+      visible_nudity: 3.0
+      shirtless_male: 2.0
+      romantic_contact: 2.0
+      suggestive_pose: 1.5
+      gender: 0.5
+      age_group: 0.5
+      medium: 0.3
+  class_balance:
+    block_ratio_target: 0.5
+    edge_case_oversample: 2.0
+  checkpoint:
+    save_steps: 500
+    keep_last: 3
+
+export:
+  tflite:
+    quantization: int8
+    calibration_samples: 500
+    target_max_kb: 5500
+  coreml:
+    weight_dtype: int8
+    activation_dtype: fp16
+    minimum_deployment_target: iOS16
+
+active_learning:
+  pool_size: 50000
+  selection_size: 5000
+  selection_strategy: combined      # entropy + margin + crop_vs_full_disagreement
+  vlm_routing_confidence_floor: 0.85
+
+eval:
+  holdout_size: 1500
+  required_recall_not_acceptable: 0.95
+  required_precision_not_acceptable: 0.85
+  latency_budget_ms_p95: 30

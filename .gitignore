@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.local
+secrets.json
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Models (large, version externally)
+models/*.tflite
+models/*.mlpackage
+models/*.keras
+models/*.onnx
+models/*.pt
+models/*.pth
+
+# Local review UI database
+review_ui/*.db
+review_ui/*.sqlite
+
+# Manifests (these are big parquet files — push to HF, not git)
+manifests/*.parquet
+test_sets/*.parquet
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp

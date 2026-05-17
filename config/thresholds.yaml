@@ -1,0 +1,27 @@
+# Per-attribute decision thresholds. Tuned during training (threshold_tuner.py)
+# and overwritten when calibration produces better values.
+#
+# Initial seed values err strongly toward BLOCK ("when in doubt, block").
+# All thresholds are PROBABILITY of the listed positive class.
+
+block_overall: 0.45                  # final block decision threshold (low → favors blocking)
+
+per_attribute:
+  visible_nudity:
+    partial: 0.30
+    full: 0.30
+  shirtless_male: 0.35
+  romantic_contact: 0.40
+  suggestive_pose: 0.40
+  female_violations:
+    sleeve_short_or_none: 0.40
+    cleavage_visible: 0.40
+    lower_garment_pants: 0.45
+    lower_garment_shorts: 0.40
+    lower_garment_swimwear: 0.35
+    lower_length_above_knee: 0.40
+    fit_tight: 0.45
+
+# Calibration temperature (set by calibrator.py after training).
+# Default 1.0 = uncalibrated.
+temperature: 1.0

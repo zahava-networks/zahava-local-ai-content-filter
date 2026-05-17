@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tzniut Review</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="dot"></span>
+      <span>Tzniut Review</span>
+    </div>
+    <div class="stats" id="stats-bar">
+      <span><b id="stat-reviewed">0</b> reviewed</span>
+      <span><b id="stat-pending">0</b> pending</span>
+      <span><b id="stat-rate">—</b> accept rate</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="viewer" id="viewer">
+      <div class="image-wrap">
+        <img id="image" alt="" />
+        <div class="overlay" id="overlay">
+          <div class="verdict" id="verdict">…</div>
+          <div class="reasoning" id="reasoning"></div>
+        </div>
+      </div>
+      <div class="meta">
+        <div class="row"><span class="key">image_id</span><span class="val" id="meta-id">—</span></div>
+        <div class="row"><span class="key">confidence</span><span class="val" id="meta-conf">—</span></div>
+        <div class="row"><span class="key">flagged</span><span class="val" id="meta-flag">—</span></div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2>Attributes</h2>
+      <div class="attr-grid" id="attrs"></div>
+
+      <h2>Decision</h2>
+      <div class="buttons">
+        <button class="btn btn-accept" id="btn-accept" title="A"><span class="kbd">A</span> Accept</button>
+        <button class="btn btn-reject" id="btn-reject" title="R"><span class="kbd">R</span> Reject (force block)</button>
+        <button class="btn btn-skip"   id="btn-skip"   title="Space"><span class="kbd">␣</span> Skip</button>
+        <button class="btn btn-bad"    id="btn-bad"    title="B"><span class="kbd">B</span> Bad image</button>
+      </div>
+
+      <h2>Notes</h2>
+      <textarea id="notes" rows="3" placeholder="optional, edge-case explanation"></textarea>
+
+      <button class="btn btn-push" id="btn-push">Push reviewed batch to HF</button>
+    </aside>
+  </main>
+
+  <footer>
+    <span class="hint">Keyboard: <b>A</b> accept · <b>R</b> reject · <b>B</b> bad · <b>Space</b> skip · <b>1-9</b> toggle attribute</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

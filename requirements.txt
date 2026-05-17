@@ -1,0 +1,45 @@
+# Core
+pyyaml>=6.0
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+tqdm>=4.66.0
+pydantic>=2.5.0
+
+# Data
+pandas>=2.1.0
+pyarrow>=14.0.0
+numpy>=1.26.0
+pillow>=10.1.0
+imagehash>=4.3.1
+
+# Cloud / storage
+boto3>=1.34.0              # Cloudflare R2 (S3 API)
+huggingface-hub>=0.23.0
+datasets>=2.18.0
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+
+# Labeling APIs
+google-genai>=0.5.0        # Gemini 2.x
+openai>=1.30.0             # NIM uses OpenAI-compatible endpoint
+requests>=2.31.0
+
+# Source dataset access
+fiftyone>=0.23.0           # Open Images V7
+wikimedia>=0.1.0
+
+# ML (training in Colab; we keep imports light locally)
+# Pinned versions installed in the Colab notebook itself.
+
+# Review UI (local laptop)
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+jinja2>=3.1.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+httpx>=0.27.0
+
+# Orchestration
+click>=8.1.0
+rich>=13.7.0
