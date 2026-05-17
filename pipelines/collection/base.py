@@ -68,7 +68,11 @@ def ingest(
 
     resized = resize_for_storage(img)
     body = encode_webp(resized)
-    r2_key = f"{cfg['storage']['prefix_resized']}{source}/{iid}.webp"
+    # Shard into 256 sub-directories by the first 2 hex chars of the content
+    # hash. HF/git rejects directories with more than 10k files; sharding
+    # gives us up to 2.56M files per source.
+    shard = iid[4:6] if len(iid) >= 6 else "00"
+    r2_key = f"{cfg['storage']['prefix_resized']}{source}/{shard}/{iid}.webp"
 
     if not r2_client.exists(r2_key):
         r2_client.upload_bytes(r2_key, body, content_type="image/webp")
